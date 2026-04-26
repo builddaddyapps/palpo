@@ -149,12 +149,48 @@ async fn auth_by_delegated_token(token: &str, aa: &AuthArgs, depot: &mut Depot) 
         return Err(MatrixError::unknown_token("Token is not active", true).into());
     }
 
+    let conf = config::get();
+
+    // RFC 7662 §2.2: validate the `aud` claim where possible to prevent
+    // cross-resource-server token reuse. This is opt-in for two reasons:
+    //   1. Some authorization servers (notably MAS v1.x) do not populate
+    //      `aud` in introspection responses at all. Requiring it would
+    //      fail-closed and break the delegated-auth path entirely.
+    //   2. Forward-compatibility with future AS versions or other
+    //      implementations that DO populate `aud`.
+    //
+    // The validation kicks in only when both sides participate:
+    //   - `delegated_auth.expected_aud` is configured, AND
+    //   - the introspection response includes an `aud` claim.
+    // If the operator sets `expected_aud` and the AS DOES return `aud`,
+    // the values must match exactly. If the AS returns `aud` while
+    // `expected_aud` is not configured, we let it through (the operator
+    // hasn't asked us to validate). If `expected_aud` is configured and
+    // the AS does NOT return `aud`, we let it through (the AS doesn't
+    // support this; operator has been warned at config-load time).
+    //
+    // Stronger protection (mandatory aud) requires AS support for it
+    // and a coordinated config change.
+    let da = conf
+        .enabled_delegated_auth()
+        .ok_or_else(|| MatrixError::unknown_token("Delegated auth not enabled", true))?;
+    if let (Some(expected_aud), Some(aud_value)) = (da.expected_aud.as_deref(), result.aud.as_ref())
+    {
+        let aud_matches = match aud_value {
+            serde_json::Value::String(s) => s == expected_aud,
+            serde_json::Value::Array(arr) => arr.iter().any(|v| v.as_str() == Some(expected_aud)),
+            _ => false,
+        };
+        if !aud_matches {
+            return Err(MatrixError::unknown_token("Token audience mismatch", true).into());
+        }
+    }
+
     let username = result
         .username
         .as_deref()
         .ok_or_else(|| MatrixError::unknown_token("No username in introspection response", true))?;
 
-    let conf = config::get();
     let user_id = UserId::parse_with_server_name(username, &conf.server_name)
         .map_err(|_| MatrixError::unknown_token("Invalid username in token", true))?;
 
