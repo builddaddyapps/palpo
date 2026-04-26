@@ -44,6 +44,31 @@ pub struct DelegatedAuthConfig {
     /// Included in the well-known client response under m.authentication.
     pub account_management_url: Option<String>,
 
+    /// Expected `aud` (audience) value in the introspection response.
+    /// Opt-in: validation kicks in only when both this config is set
+    /// AND the authorization server populates `aud` in the response.
+    ///
+    /// Per RFC 7662 §2.2, the relying party SHOULD validate that the
+    /// token was issued for this resource server. Without this, a token
+    /// issued by the same authorization server for a *different*
+    /// application (a separate homeserver, a web app, anything else
+    /// registered at the same AS) could be accepted as authentication
+    /// here.
+    ///
+    /// **Compatibility note:** matrix-authentication-service v1.x does
+    /// NOT populate `aud` in introspection responses. With MAS, this
+    /// field is a no-op until upstream support arrives. For other
+    /// authorization servers, set this to the resource indicator
+    /// (RFC 8707) Palpo registers as — typically the homeserver's
+    /// canonical URL or the registered `client_id`. String or array
+    /// `aud` forms are both accepted.
+    ///
+    /// When the AS returns `aud` and this is unset, validation is
+    /// skipped (operator hasn't asked for it). When this is set and
+    /// the AS doesn't return `aud`, validation is also skipped (the AS
+    /// doesn't support it).
+    pub expected_aud: Option<String>,
+
     /// Cache TTL for introspection results in seconds.
     /// Set to 0 to disable caching.
     ///
